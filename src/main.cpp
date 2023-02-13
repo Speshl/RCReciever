@@ -3,15 +3,20 @@
 #include "RF24.h"
 #include <ESP32Servo.h> 
 
-#define PACKET_SIZE 7
+#define MAX_STEER 160
+#define MIN_STEER 20
+
+#define PACKET_SIZE 4
 #define MIN_UPDATE_RATE 10 //1000ms / MIN_UPDATE_RATE 
 #define MILLI_TO_EXPECT_UPDATE 1000 / MIN_UPDATE_RATE //Stop all motors if no update recieved in this amount of time
 
 // Possible PWM GPIO pins on the ESP32: 0(used by on-board button),2,4,5(used by on-board LED),12-19,21-23,25-27,32-33 
 // Possible PWM GPIO pins on the ESP32-S2: 0(used by on-board button),1-17,18(used by on-board LED),19-21,26,33-42 
 //TODO: UPDATE THESE
-#define STEER_PIN 12
-#define ESC_PIN 13
+#define STEER_PIN 13
+#define ESC_PIN 14
+#define PAN_PIN 15
+#define TILT_PIN 16
 
 RF24 radio(16, 5);  // using pin 16 for the CE pin, and pin 5 for the CSN pin
 // Let these addresses be used for the pair
@@ -31,34 +36,21 @@ unsigned long MaxNextEventTime = millis(); //Stop motor if update not recieved b
 //data structure of device
 struct State {
     int steer;
-    int gas;
-    int brake;
-    int clutch;
-    int handBrake;
-    int gear;
+    int esc;
+    int pan;
+    int tilt;
     bool auxButton[8];
 };
 
 Servo steer;
-//Servo esc;
+Servo esc;
+Servo pan;
+Servo tilt;
 
 void setup() {
     Serial.begin(115200);
     Serial.println("Setting Up...");
 
-    ESP32PWM::allocateTimer(0);
-	ESP32PWM::allocateTimer(1);
-	ESP32PWM::allocateTimer(2);
-	ESP32PWM::allocateTimer(3);
-    steer.setPeriodHertz(50);// Standard 50hz servo
-    //esc.setPeriodHertz(50);// Standard 50hz servo
-
-    steer.attach(STEER_PIN, 1000, 2000);
-    //esc.attach(ESC_PIN, 1000, 2000);
-
-    steer.write(90);
-    //esc.write(90);
-    
     if (!radio.begin()) {
         Serial.println(F("radio hardware is not responding!!"));
         while (1) {}  // hold in infinite loop
@@ -76,6 +68,56 @@ void setup() {
     } else {
         radio.startListening();  // put radio in RX mode
     }
+
+    ESP32PWM::allocateTimer(0);
+	ESP32PWM::allocateTimer(1);
+	ESP32PWM::allocateTimer(2);
+	ESP32PWM::allocateTimer(3);
+
+    steer.setPeriodHertz(50);// Standard 50hz servo
+    esc.setPeriodHertz(50);// Standard 50hz servo
+    pan.setPeriodHertz(50);
+    tilt.setPeriodHertz(50);
+
+    steer.attach(STEER_PIN, 1000, 2000); //Min: 600 Max: 2000 for pan/tilt servo
+    esc.attach(ESC_PIN, 600, 2400);
+    //pan.attach(PAN_PIN, 600,2000);
+    //tilt.attach(TILT_PIN, 600,2000);
+
+    steer.write(90);
+    //pan.write(90);
+    //tilt.write(90);
+
+    Serial.println("FULL");
+    esc.write(180);
+    delay(5000);
+    Serial.println("NONE");
+    esc.write(0);
+    delay(5000);
+    Serial.println("CENTER");
+    esc.write(90);
+    delay(5000);
+    Serial.println("Finished Setup");
+}
+
+void describeState(State state){
+    Serial.println("******************************");
+    Serial.print("Steer: ");
+    Serial.println(state.steer);
+    Serial.print("Esc: ");
+    Serial.println(state.esc);
+    Serial.print("Pan: ");
+    Serial.println(state.pan);
+    Serial.print("Tilt: ");
+    Serial.println(state.tilt);
+
+    for(int i=0; i<8; i++){
+        Serial.print("Button ");
+        Serial.print(i);
+        Serial.print(": ");
+        Serial.println(state.auxButton[i]);
+    }
+    Serial.println("******************************");
 }
 
 State readState(){
@@ -91,48 +133,35 @@ State readState(){
 
     State newState;
     newState.steer = buffer[0];
-    newState.gas = buffer[1];
-    newState.brake = buffer[2];
-    newState.clutch = buffer[3];
-    newState.handBrake = buffer[4];
-    newState.gear = buffer[5];
+    newState.esc = buffer[1];
+
+    //newState.tilt = map(buffer[2] & 15, 0, 127, 0, 180);//Get bottom 4 bits
+    //newState.pan = map(buffer[2] >> 4, 0, 127, 0, 180);//Shift top 4 bits right and take bottom value
 
     for(int i=0; i<8;i++){
         int mask = pow(2,i);
-        if(buffer[6] & mask){
+        if(buffer[3] & mask){
             newState.auxButton[i] = true;
         }
     }
+    //describeState(newState);
     return newState;
 }
 
 void applyState(State state){
-    steer.write(state.steer);
-    //esc.write(state.gas);
-}
-
-void describeState(State state){
-    Serial.println("******************************");
-    Serial.print("Steer: ");
-    Serial.println(state.steer);
-    Serial.print("Gas: ");
-    Serial.println(state.gas);
-    Serial.print("Brake: ");
-    Serial.println(state.brake);
-    Serial.print("Clutch: ");
-    Serial.println(state.clutch);
-    Serial.print("Handbrake: ");
-    Serial.println(state.handBrake);
-    Serial.print("Gear: ");
-    Serial.println(state.gear);
-
-    for(int i=0; i<8; i++){
-        Serial.print("Button ");
-        Serial.print(i);
-        Serial.print(": ");
-        Serial.println(state.auxButton[i]);
+    int steerValue;
+    if(state.steer > MAX_STEER){
+        steerValue = MAX_STEER;
+    }else if(state.steer < MIN_STEER){
+        steerValue = MIN_STEER;
+    }else{
+        steerValue = state.steer;
     }
-    Serial.println("******************************");
+
+    Serial.print("Steer: ");
+    Serial.println(steerValue);
+    steer.write(steerValue);
+    esc.write(state.esc);
 }
 
 void loop() {
@@ -144,6 +173,6 @@ void loop() {
         applyState(newState);
     }
     if(eventTime > MaxNextEventTime){
-        //stop esc
+        esc.write(90);
     }
 }
