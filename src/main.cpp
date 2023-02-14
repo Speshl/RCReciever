@@ -51,24 +51,6 @@ void setup() {
     Serial.begin(115200);
     Serial.println("Setting Up...");
 
-    if (!radio.begin()) {
-        Serial.println(F("radio hardware is not responding!!"));
-        while (1) {}  // hold in infinite loop
-    }
-    radio.setPALevel(RF24_PA_LOW);  // RF24_PA_MAX is default.
-    radio.setPayloadSize(PACKET_SIZE);
-    // set the TX address of the RX node into the TX pipe
-    radio.openWritingPipe(address[radioNumber]);  // always uses pipe 0
-
-    // set the RX address of the TX node into a RX pipe
-    radio.openReadingPipe(1, address[!radioNumber]);  // using pipe 1
-
-    if (role) {
-        radio.stopListening();  // put radio in TX mode
-    } else {
-        radio.startListening();  // put radio in RX mode
-    }
-
     ESP32PWM::allocateTimer(0);
 	ESP32PWM::allocateTimer(1);
 	ESP32PWM::allocateTimer(2);
@@ -97,6 +79,24 @@ void setup() {
     Serial.println("CENTER");
     esc.write(90);
     delay(5000);
+
+    if (!radio.begin()) {
+        Serial.println(F("radio hardware is not responding!!"));
+        while (1) {}  // hold in infinite loop
+    }
+    radio.setPALevel(RF24_PA_MAX);  // RF24_PA_MAX is default.
+    radio.setPayloadSize(PACKET_SIZE);
+    // set the TX address of the RX node into the TX pipe
+    radio.openWritingPipe(address[radioNumber]);  // always uses pipe 0
+
+    // set the RX address of the TX node into a RX pipe
+    radio.openReadingPipe(1, address[!radioNumber]);  // using pipe 1
+
+    if (role) {
+        radio.stopListening();  // put radio in TX mode
+    } else {
+        radio.startListening();  // put radio in RX mode
+    }
     Serial.println("Finished Setup");
 }
 
